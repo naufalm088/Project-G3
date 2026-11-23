@@ -1,6 +1,6 @@
 import type { ProfileInfo } from "@/lib/types";
 
-export const APP_NAME = "Smart Kos Energi";
+export const APP_NAME = "Monitoring Kos Ijo";
 export const APP_GROUP = "G3";
 
 export const DEMO_PROFILE: ProfileInfo = {

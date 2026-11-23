@@ -9,6 +9,5 @@ export const USE_SUPABASE = !DEMO_MODE && hasSupabaseEnv;
 
 export const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
-export const TARIF_PLN_DEFAULT = 1444.7;
-
-export const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+export const DEFAULT_RENT = 500_000;
+export const RENT_DUE_DAY_DEFAULT = 5;

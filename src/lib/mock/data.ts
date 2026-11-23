@@ -1,177 +1,195 @@
 import { DEMO_PROFILE } from "@/lib/app-constants";
-import { TARIF_PLN_DEFAULT } from "@/lib/config";
-import { addDays, startOfDay, startOfMonth, toDateKey } from "@/lib/date";
+// (date helpers not needed in mock data)
 import type {
   AppData,
-  DailySummary,
-  Device,
+  Kos,
   NotificationRow,
-  Reading,
+  Payment,
   Room,
+  Settings,
+  Tenant,
 } from "@/lib/types";
 
 const DEMO_KOS_ID = "demo-kos";
-const TARIF = TARIF_PLN_DEFAULT;
+const OWNER_PHONE = DEMO_PROFILE.phone;
 
-type RoomSeed = {
-  id: string;
+const ROOM_SEEDS: {
+  number: string;
   name: string;
-  tenant: string;
-  monthlyKwh: number;
-  currentWatt: number;
-  mcbLimitAmp: number;
-};
-
-const ROOM_SEEDS: RoomSeed[] = [
-  { id: "demo-room-1", name: "Kamar 1", tenant: "Mas Bayu", monthlyKwh: 142, currentWatt: 410, mcbLimitAmp: 10 },
-  { id: "demo-room-2", name: "Kamar 2", tenant: "Mbak Ratih", monthlyKwh: 185, currentWatt: 620, mcbLimitAmp: 10 },
-  { id: "demo-room-3", name: "Kamar 3", tenant: "Mas Doni", monthlyKwh: 65, currentWatt: 120, mcbLimitAmp: 10 },
-  { id: "demo-room-4", name: "Kamar 4", tenant: "Mbak Dian", monthlyKwh: 52.7, currentWatt: 95, mcbLimitAmp: 10 },
+  floor: number;
+  rent: number;
+  status: "occupied" | "vacant" | "maintenance";
+  tenant?: { name: string; phone: string; moveIn: string; rent?: number; dueDay: number };
+}[] = [
+  { number: "1", name: "Kamar 1", floor: 1, rent: 550_000, status: "occupied", tenant: { name: "Mas Bayu", phone: "0812-1111-2222", moveIn: "2026-01-10", dueDay: 5 } },
+  { number: "2", name: "Kamar 2", floor: 1, rent: 550_000, status: "occupied", tenant: { name: "Mbak Ratih", phone: "0813-2222-3333", moveIn: "2026-02-15", dueDay: 5 } },
+  { number: "3", name: "Kamar 3", floor: 1, rent: 500_000, status: "occupied", tenant: { name: "Mas Doni", phone: "0814-3333-4444", moveIn: "2026-03-01", dueDay: 5 } },
+  { number: "4", name: "Kamar 4", floor: 2, rent: 600_000, status: "occupied", tenant: { name: "Mbak Dian", phone: "0815-4444-5555", moveIn: "2026-01-20", dueDay: 5 } },
+  { number: "5", name: "Kamar 5", floor: 2, rent: 450_000, status: "vacant" },
+  { number: "6", name: "Kamar 6", floor: 2, rent: 500_000, status: "vacant" },
 ];
 
-const TOTAL_SEED_KWH = ROOM_SEEDS.reduce((acc, room) => acc + room.monthlyKwh, 0);
-
-const LAST_SEVEN_DAYS = [9.6, 22.4, 16.8, 15.0, 14.1, 13.5, 12.2];
-
-function round(value: number, digits: number): number {
-  const factor = 10 ** digits;
-  return Math.round(value * factor) / factor;
+function periodKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function seededNoise(date: Date): number {
-  const seed = date.getFullYear() * 372 + (date.getMonth() + 1) * 31 + date.getDate();
-  return Math.sin(seed);
+function dueDateFor(period: string, dueDay: number): string {
+  const [y, m] = period.split("-").map(Number);
+  const day = Math.min(dueDay, 28);
+  return `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 export function buildDemoAppData(now = new Date()): AppData {
-  const today = startOfDay(now);
-  const monthStart = startOfMonth(today);
-  const summaries: DailySummary[] = [];
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const currentPeriod = periodKey(today);
 
-  for (let offset = 29; offset >= 0; offset -= 1) {
-    const date = addDays(today, -offset);
-    let kwh: number;
+  const nowIso = now.toISOString();
+  const rooms: Room[] = ROOM_SEEDS.map((seed, index) => ({
+    id: `demo-room-${index + 1}`,
+    kosId: DEMO_KOS_ID,
+    number: seed.number,
+    name: seed.name,
+    floor: seed.floor,
+    monthlyRent: seed.rent,
+    status: seed.status,
+    sortOrder: index + 1,
+    createdAt: nowIso,
+  }));
 
-    if (offset <= 6) {
-      kwh = LAST_SEVEN_DAYS[offset];
-    } else if (date.getTime() >= monthStart.getTime()) {
-      kwh = 21.3 + seededNoise(date) * 1.6;
-    } else {
-      kwh = 17.6 + seededNoise(date) * 2.4;
-    }
+  // gudang
+  rooms.push({
+    id: "demo-room-g",
+    kosId: DEMO_KOS_ID,
+    number: "G",
+    name: "Gudang",
+    floor: 1,
+    monthlyRent: 0,
+    status: "maintenance",
+    sortOrder: 7,
+    createdAt: nowIso,
+  });
 
-    kwh = round(Math.max(2, kwh), 3);
-    const dateKey = toDateKey(date);
+  const tenants: Tenant[] = ROOM_SEEDS.filter((s) => s.tenant).map((seed, index) => ({
+    id: `demo-tenant-${index + 1}`,
+    kosId: DEMO_KOS_ID,
+    roomId: `demo-room-${index + 1}`,
+    fullName: seed.tenant!.name,
+    phone: seed.tenant!.phone,
+    moveInDate: seed.tenant!.moveIn,
+    monthlyRent: seed.tenant!.rent ?? null,
+    dueDay: seed.tenant!.dueDay,
+    notes: null,
+    createdAt: new Date().toISOString(),
+  }));
 
-    summaries.push({
-      kosId: DEMO_KOS_ID,
-      roomId: null,
-      date: dateKey,
-      totalKwh: kwh,
-      totalRupiah: round(kwh * TARIF, 2),
-    });
+  const tenantByRoom = new Map(tenants.map((t) => [t.roomId, t]));
 
-    for (const room of ROOM_SEEDS) {
-      const share = room.monthlyKwh / TOTAL_SEED_KWH;
-      const roomKwh = round(kwh * share, 3);
-      summaries.push({
+  // payments: 3 bulan terakhir
+  const periods: string[] = [];
+  for (let i = 2; i >= 0; i -= 1) {
+    const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+    periods.push(periodKey(d));
+  }
+
+  const payments: Payment[] = [];
+  let pid = 1;
+  for (const period of periods) {
+    const isCurrent = period === currentPeriod;
+    for (const room of rooms) {
+      if (room.status !== "occupied") continue;
+      const tenant = tenantByRoom.get(room.id);
+      if (!tenant) continue;
+      const amount = tenant.monthlyRent ?? room.monthlyRent;
+      const dueDay = tenant.dueDay;
+      const dueDate = dueDateFor(period, dueDay);
+      const dueDateObj = new Date(dueDate);
+      let status: Payment["status"] = "pending";
+      let paidAt: string | null = null;
+
+      if (!isCurrent) {
+        status = "paid";
+        paidAt = new Date(dueDateObj.getTime() + 2 * 24 * 60 * 60 * 1000).toISOString();
+      } else {
+        // current month: room 1 & 4 paid, room 2 pending, room 3 overdue
+        if (room.number === "1" || room.number === "4") {
+          status = "paid";
+          paidAt = new Date(today.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString();
+        } else if (room.number === "3") {
+          status = "overdue";
+        } else {
+          status = "pending";
+        }
+      }
+
+      payments.push({
+        id: `demo-pay-${pid++}`,
         kosId: DEMO_KOS_ID,
         roomId: room.id,
-        date: dateKey,
-        totalKwh: roomKwh,
-        totalRupiah: round(roomKwh * TARIF, 2),
+        tenantId: tenant.id,
+        period,
+        amount,
+        dueDate,
+        paidAt,
+        status,
+        method: status === "paid" ? "Transfer" : null,
+        notes: null,
+        createdAt: new Date().toISOString(),
       });
     }
   }
-
-  const rooms: Room[] = ROOM_SEEDS.map((seed, index) => ({
-    id: seed.id,
-    kosId: DEMO_KOS_ID,
-    name: seed.name,
-    tenantName: seed.tenant,
-    sortOrder: index + 1,
-    mcbLimitAmp: seed.mcbLimitAmp,
-    relayOn: true,
-  }));
-
-  const devices: Device[] = ROOM_SEEDS.map((seed, index) => ({
-    id: `demo-device-${index + 1}`,
-    kosId: DEMO_KOS_ID,
-    roomId: seed.id,
-    name: `PZEM ${seed.name}`,
-    lastSeenAt: new Date(now.getTime() - 8_000).toISOString(),
-    isOnline: true,
-  }));
-
-  const latestReadings: Record<string, Reading | undefined> = {};
-  ROOM_SEEDS.forEach((seed, index) => {
-    const voltage = round(220.4 + seededNoise(new Date(now.getTime() - index)) * 0.4, 1);
-    const current = round(seed.currentWatt / voltage, 2);
-    latestReadings[seed.id] = {
-      id: `demo-reading-${index + 1}`,
-      kosId: DEMO_KOS_ID,
-      roomId: seed.id,
-      deviceId: `demo-device-${index + 1}`,
-      ts: new Date(now.getTime() - 8_000).toISOString(),
-      voltage,
-      current,
-      powerWatt: seed.currentWatt,
-      energyKwh: 0,
-      frequency: 50,
-      powerFactor: 0.95,
-    };
-  });
 
   const notifications: NotificationRow[] = [
     {
       id: "demo-notif-1",
       kosId: DEMO_KOS_ID,
-      type: "budget_waspada",
-      severity: "warn",
-      message:
-        "Peringatan: Penggunaan listrik minggu ini lebih dari biasanya. Segera cek dashboard.",
+      type: "payment_overdue",
+      severity: "danger",
+      message: "Kamar 3 (Mas Doni) belum membayar sewa bulan ini. Jatuh tempo 5 " + new Date(today.getFullYear(), today.getMonth(), 1).toLocaleString("id-ID", { month: "long" }) + ".",
       isRead: false,
-      createdAt: new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString(),
+      createdAt: new Date(today.getTime() - 1 * 24 * 60 * 60 * 1000).toISOString(),
     },
     {
       id: "demo-notif-2",
       kosId: DEMO_KOS_ID,
-      type: "device_online",
-      severity: "info",
-      message: "ESP32 & PZEM-004T terhubung kembali ke jaringan kos.",
-      isRead: true,
-      createdAt: new Date(now.getTime() - 26 * 60 * 60 * 1000).toISOString(),
+      type: "payment_reminder",
+      severity: "warn",
+      message: "Pengingat: 2 kamar jatuh tempo dalam 3 hari. Siapkan penagihan.",
+      isRead: false,
+      createdAt: new Date(today.getTime() - 2 * 60 * 60 * 1000).toISOString(),
     },
   ];
+
+  const kos: Kos = {
+    id: DEMO_KOS_ID,
+    ownerId: DEMO_PROFILE.id,
+    name: DEMO_PROFILE.kosName,
+    address: "Jl. Melati Raya No. 12, Jakarta Selatan",
+    cctvUrl: null,
+  };
+
+  const settings: Settings = {
+    id: "demo-settings",
+    kosId: DEMO_KOS_ID,
+    rentDueDay: 5,
+    defaultRent: 500_000,
+    notifActive: true,
+    notifReminder: true,
+    notifOverdue: true,
+    ownerPhone: OWNER_PHONE,
+    cctvUrl: null,
+    uiMode: "classic",
+    waTemplate: "Halo {nama},\n\nTagihan sewa {kamar} ({kos}) periode {bulan}:\n- Sewa bulanan: {jumlah}\n- Jatuh tempo: {jatuhTempo}\n\nMohon dibayar sebelum jatuh tempo. Terima kasih.",
+    updatedAt: now.toISOString(),
+  };
 
   return {
     source: "demo",
     profile: DEMO_PROFILE,
-    kos: {
-      id: DEMO_KOS_ID,
-      ownerId: DEMO_PROFILE.id,
-      name: DEMO_PROFILE.kosName,
-      address: "Jl. Melati Raya No. 12, Jakarta Selatan",
-    },
-    settings: {
-      id: "demo-settings",
-      kosId: DEMO_KOS_ID,
-      budgetLimit: 850_000,
-      tariffPerKwh: TARIF,
-      notifActive: true,
-      notifWaspada: true,
-      notifBahaya: true,
-      warnThreshold: 75,
-      dangerThreshold: 95,
-      notifWa: true,
-      notifPush: true,
-      waNumber: DEMO_PROFILE.phone,
-      updatedAt: now.toISOString(),
-    },
+    kos,
+    settings,
     rooms,
-    devices,
-    latestReadings,
-    summaries,
+    tenants,
+    payments,
     notifications,
     fetchedAt: now.toISOString(),
   };

@@ -7,8 +7,9 @@ import { cn } from "@/lib/utils";
 
 const navItems = [
   { href: "/dashboard", label: "Beranda", icon: "home" },
-  { href: "/riwayat", label: "Riwayat", icon: "bar_chart" },
-  { href: "/pengaturan", label: "Limit & Atur", icon: "tune" },
+  { href: "/kamar", label: "Kamar", icon: "meeting_room" },
+  { href: "/riwayat", label: "Riwayat", icon: "receipt_long" },
+  { href: "/pengaturan", label: "Atur", icon: "tune" },
 ];
 
 export function BottomNav() {

@@ -1,49 +1,51 @@
-# Ringkasan PRD — Smart Energy Monitor Kos (Kelompok G3)
+# Ringkasan PRD — Smart Kos Monitor (Kelompok G3)
 
-Sumber: `PRD_Smart_Energy_Monitor_Kos_Kelompok_G3.pdf`.
+Sumber: PRD awal (monitoring listrik kos) direvisi total menjadi monitoring kos online.
 
 ## Latar belakang
 
-Pemilik kos kesulitan memantau konsumsi listrik per kamar dan sering terkejut tagihan PLN
-membengkak. Dibutuhkan dashboard real-time per kamar dengan peringatan dini.
+Pemilik kos kesulitan memantau kamar, penghuni, pembayaran sewa, dan keamanan kos secara terpusat.
+Dibutuhkan dashboard online (HP & PC) yang ramah orang tua/pemilik kos, dengan fitur tagih sewa
+via WhatsApp dan CCTV.
 
 ## Persona
 
-- **Bu Suwanti** — pemilik kos, 4 kamar, tidak melek teknologi, butuh tampilan sederhana & bahasa Indonesia, akses via HP.
+- **Bu Suwanti** — pemilik kos, 6 kamar, tidak melek teknologi, butuh tampilan sederhana & bahasa Indonesia, akses via HP/PC.
 
 ## Fitur (MVP)
 
 | Kode | Fitur |
 | --- | --- |
-| FT-01 | Total tagihan berjalan + persentase anggaran |
-| FT-02 | Status AMAN (<75%) / WASPADA (75–95%) / BAHAYA (>95%) |
-| FT-03 | Monitoring per kamar (akumulasi kWh, beban daya, relay ON/OFF) |
-| FT-04 | Atur batas anggaran bulanan + konversi kWh |
-| FT-05 | Notifikasi peringatan (Waspada/Bahaya) via WhatsApp & push |
-| FT-06 | Riwayat & tren (grafik, puncak/terendah, rata-rata) |
-| FT-07 | Ekspor laporan PDF & CSV |
+| FT-01 | Dashboard: CCTV preview, pendapatan bulan ini (target vs terkumpul + progress + grafik 6 bulan), counts (total/terisi/kosong/jatuh tempo), grid kamar, notifikasi, tips |
+| FT-02 | Daftar & detail kamar (edit kamar/penghuni, status pembayaran, Tagih WA manual, Chat Manual, Tandai Lunas, riwayat pembayaran kamar, hapus kamar) |
+| FT-03 | Riwayat pembayaran (filter periode/kamar/status, ringkasan, ekspor PDF & CSV) |
+| FT-04 | CCTV (preview di dashboard + halaman penuh, placeholder jika belum terhubung, URL di Pengaturan) |
+| FT-05 | Pengaturan: profil kos, due day, sewa default, CCTV URL, notifikasi, template pesan WA, mode UI (Klasik/Modern), CRUD kamar, logout |
+| FT-06 | Mode UI Klasik (card) / Modern (3D interaktif, drag untuk memutar, klik kamar → detail; gudang = under maintenance) |
+| FT-07 | Notifikasi in-app (H-3 jatuh tempo, overdue) + link WA manual |
+| FT-08 | Auth (login/register Supabase, provisioning kos + 6 kamar + gudang) |
 
-## Parameter teknis
+## Parameter
 
-- Sensor: 4x PZEM-004T v3 (CT clamp non-invasif) + ESP32 gateway.
-- Tarif PLN R-1/TR: Rp 1.444,70/kWh (subsidi non, daya 1.300–2.200 VA).
-- Ambang: Waspada 75%, Bahaya 95% dari budget.
-- Budget default: Rp 850.000/bulan.
-- Stale/offline: data > 5 menit.
-- Siklus tagihan: tgl 1 – akhir bulan, reset 00:00.
+- Total kamar: 6 + 1 gudang (maintenance).
+- Sewa bulanan per kamar (contoh): 550k / 550k / 500k / 600k / 450k / 500k.
+- Jatuh tempo: tanggal 1–28 (default 5).
+- Target pendapatan bulan ini = jumlah sewa kamar terisi (auto-update).
+- CCTV: 1 kamera untuk seluruh kos.
 
 ## KPI keberhasilan
 
 - Task success rate ≥ 80%, SUS ≥ 68.
-- Penurunan tagihan listrik ≥ 10% setelah 2 bulan pemakaian.
-- 0 kejadian pemadaman akibat overload setelah monitoring.
+- Pemilik dapat mengetahui status pembayaran semua kamar dalam < 10 detik.
+- Penagihan via WA dilakukan dalam ≤ 3 klik.
 
 ## Non-fungsional
 
-- Mobile-first, PWA-friendly, offline-tolerant (data terakhir tetap tampil).
-- Keamanan: RLS per pemilik, API key SHA-256 untuk ingest.
+- Responsif: mobile (bottom nav) → tablet → desktop (wide layout).
+- Keamanan: RLS per pemilik, auth Supabase.
 - Bahasa Indonesia, format angka id-ID.
+- Aksesibilitas: touch target ≥ 48px, aria-label.
 
 ## Out of scope (MVP)
 
-- Kontrol hardware nyata (relay remote), tagihan otomatis via WhatsApp API, multi-pemilik/kos.
+- Kontrol hardware/CCTV auto-provisioning, auto-send WhatsApp (butuh WhatsApp Business API), multi-pemilik/kos, pembayaran parsial, maintenance request, laporan keuangan lanjut.

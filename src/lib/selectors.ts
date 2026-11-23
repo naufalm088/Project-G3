@@ -1,246 +1,208 @@
-import { STALE_THRESHOLD_MS } from "@/lib/config";
-import {
-  addDays,
-  formatMonthYear,
-  fromDateKey,
-  isSameDay,
-  monthName,
-  startOfDay,
-  startOfMonth,
-  toDateKey,
-} from "@/lib/date";
-import { classifyRatio, statusLabelFromTone } from "@/lib/energy";
+// date helpers not needed here
+import { formatPeriod } from "@/lib/format";
 import type {
   AppData,
   DashboardView,
-  DailySummary,
-  HistoryDay,
-  HistoryView,
+  IncomePoint,
+  Payment,
+  PaymentHistoryView,
+  PaymentStatus,
+  RoomDetailView,
   RoomMetric,
-  StatusTone,
 } from "@/lib/types";
 
-export type HistoryRange = "7d" | "this-month" | "last-month";
+export type PaymentFilter = {
+  period?: string; // "YYYY-MM" or "all"
+  roomId?: string;
+  status?: PaymentStatus | "all";
+};
 
-export const HISTORY_RANGE_OPTIONS: { value: HistoryRange; label: string }[] = [
-  { value: "7d", label: "7 Hari Terakhir" },
-  { value: "this-month", label: "Bulan Ini" },
-  { value: "last-month", label: "Bulan Lalu" },
+export const PAYMENT_STATUS_OPTIONS: { value: PaymentStatus | "all"; label: string }[] = [
+  { value: "all", label: "Semua Status" },
+  { value: "pending", label: "Belum Bayar" },
+  { value: "paid", label: "Lunas" },
+  { value: "overdue", label: "Jatuh Tempo" },
 ];
 
-function sumRows(rows: DailySummary[]): { kwh: number; rupiah: number } {
-  return rows.reduce(
-    (acc, row) => ({
-      kwh: acc.kwh + row.totalKwh,
-      rupiah: acc.rupiah + row.totalRupiah,
-    }),
-    { kwh: 0, rupiah: 0 },
-  );
+export function currentPeriod(now = new Date()): string {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
-function daysInMonth(date: Date): number {
-  return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
+function effectiveRent(room: AppData["rooms"][number], tenant: AppData["tenants"][number] | undefined): number {
+  if (tenant?.monthlyRent && tenant.monthlyRent > 0) return tenant.monthlyRent;
+  return room.monthlyRent;
 }
 
-export function selectMonthTotals(data: AppData, now = new Date()) {
-  const startKey = toDateKey(startOfMonth(now));
-  const endKey = toDateKey(startOfDay(now));
-  const rows = data.summaries.filter(
-    (row) => row.roomId === null && row.date >= startKey && row.date <= endKey,
-  );
-  return sumRows(rows);
+function tenantForRoom(data: AppData, roomId: string): AppData["tenants"][number] | undefined {
+  return data.tenants.find((t) => t.roomId === roomId);
 }
 
-export function selectRoomMetrics(
-  data: AppData,
-  overallTone: StatusTone,
-  monthlyTotalKwh: number,
-  now = new Date(),
-): RoomMetric[] {
-  const startKey = toDateKey(startOfMonth(now));
-  const endKey = toDateKey(startOfDay(now));
+function paymentForRoomPeriod(data: AppData, roomId: string, period: string): Payment | undefined {
+  return data.payments.find((p) => p.roomId === roomId && p.period === period);
+}
 
-  const base = data.rooms
+function computePaymentStatus(payment: Payment | undefined, today: Date): PaymentStatus | "none" {
+  if (!payment) return "none";
+  if (payment.status === "paid") return "paid";
+  const due = new Date(payment.dueDate);
+  if (due.getTime() < new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) {
+    return "overdue";
+  }
+  return "pending";
+}
+
+export function selectRoomMetrics(data: AppData, now = new Date()): RoomMetric[] {
+  const period = currentPeriod(now);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+
+  return data.rooms
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .map((room) => {
-      const rows = data.summaries.filter(
-        (row) =>
-          row.roomId === room.id && row.date >= startKey && row.date <= endKey,
-      );
-      const totals = sumRows(rows);
-      const latest = data.latestReadings[room.id];
-      return {
-        room,
-        monthlyKwh: totals.kwh,
-        monthlyCost: totals.rupiah,
-        currentWatt: latest?.powerWatt ?? 0,
-        latest,
-        shareOfTotal: monthlyTotalKwh > 0 ? (totals.kwh / monthlyTotalKwh) * 100 : 0,
-      };
+      const tenant = tenantForRoom(data, room.id);
+      const rent = effectiveRent(room, tenant);
+      const payment = paymentForRoomPeriod(data, room.id, period);
+      const paymentStatus = computePaymentStatus(payment, today);
+      return { room, tenant: tenant ?? null, effectiveRent: rent, payment: payment ?? null, paymentStatus };
     });
-
-  const topKwh = base.reduce((max, item) => Math.max(max, item.monthlyKwh), 0);
-
-  return base.map((item) => {
-    const isTopConsumer = topKwh > 0 && item.monthlyKwh === topKwh;
-    let tone: StatusTone = "safe";
-    if (isTopConsumer && overallTone === "danger") tone = "danger";
-    else if (isTopConsumer && overallTone === "warn") tone = "warn";
-
-    return { ...item, isTopConsumer, tone };
-  });
 }
 
 export function selectDashboard(data: AppData, now = new Date()): DashboardView {
-  const { settings, rooms } = data;
-  const month = selectMonthTotals(data, now);
-  const budgetLimit = settings.budgetLimit;
-  const budgetRatio = budgetLimit > 0 ? (month.rupiah / budgetLimit) * 100 : 0;
-  const tone = classifyRatio(budgetRatio, settings.warnThreshold, settings.dangerThreshold);
+  const period = currentPeriod(now);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-  const roomMetrics = selectRoomMetrics(data, tone, month.kwh, now);
+  const rooms = selectRoomMetrics(data, now);
 
-  const latestReadings = roomMetrics
-    .map((metric) => metric.latest)
-    .filter((reading): reading is NonNullable<typeof reading> => Boolean(reading));
+  const occupiedRooms = rooms.filter((m) => m.room.status === "occupied");
+  const target = occupiedRooms.reduce((acc, m) => acc + m.effectiveRent, 0);
 
-  const totalWatt = latestReadings.reduce((acc, reading) => acc + (reading.powerWatt ?? 0), 0);
-  const totalCurrent = latestReadings.reduce((acc, reading) => acc + (reading.current ?? 0), 0);
-  const voltageValues = latestReadings
-    .map((reading) => reading.voltage)
-    .filter((value): value is number => typeof value === "number");
-  const frequencyValues = latestReadings
-    .map((reading) => reading.frequency)
-    .filter((value): value is number => typeof value === "number");
+  const paymentsThisMonth = data.payments.filter((p) => p.period === period);
+  const collected = paymentsThisMonth
+    .filter((p) => p.status === "paid")
+    .reduce((acc, p) => acc + p.amount, 0);
+  const pending = paymentsThisMonth
+    .filter((p) => p.status === "pending")
+    .reduce((acc, p) => acc + p.amount, 0);
+  const overdue = paymentsThisMonth
+    .filter((p) => p.status === "overdue")
+    .reduce((acc, p) => acc + p.amount, 0);
 
-  const voltage =
-    voltageValues.length > 0
-      ? voltageValues.reduce((acc, value) => acc + value, 0) / voltageValues.length
-      : null;
-  const frequency =
-    frequencyValues.length > 0
-      ? frequencyValues.reduce((acc, value) => acc + value, 0) / frequencyValues.length
-      : null;
+  // payments whose due_date passed but still pending -> overdue
+  let overdueAdjusted = overdue;
+  let pendingAdjusted = pending;
+  for (const p of paymentsThisMonth) {
+    if (p.status === "pending") {
+      const due = new Date(p.dueDate);
+      if (due.getTime() < today.getTime()) {
+        overdueAdjusted += p.amount;
+        pendingAdjusted -= p.amount;
+      }
+    }
+  }
 
-  const lastReadingAt =
-    latestReadings.length > 0
-      ? latestReadings.reduce((latest, reading) => (reading.ts > latest ? reading.ts : latest), latestReadings[0].ts)
-      : null;
+  const counts = {
+    total: data.rooms.length,
+    occupied: data.rooms.filter((r) => r.status === "occupied").length,
+    vacant: data.rooms.filter((r) => r.status === "vacant").length,
+    maintenance: data.rooms.filter((r) => r.status === "maintenance").length,
+    overdue: paymentsThisMonth.filter((p) => {
+      if (p.status === "overdue") return true;
+      if (p.status === "pending") {
+        return new Date(p.dueDate).getTime() < today.getTime();
+      }
+      return false;
+    }).length,
+    pending: paymentsThisMonth.filter((p) => p.status === "pending" && new Date(p.dueDate).getTime() >= today.getTime()).length,
+  };
 
-  const lastReadingMs = lastReadingAt ? new Date(lastReadingAt).getTime() : 0;
-  const isStale = !lastReadingAt || now.getTime() - lastReadingMs > STALE_THRESHOLD_MS;
-  const deviceOnline = data.devices.some((device) => device.isOnline) && !isStale;
+  // income history: last 6 months
+  const historyMonths: string[] = [];
+  for (let i = 5; i >= 0; i -= 1) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    historyMonths.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  const incomeHistory: IncomePoint[] = historyMonths.map((per) => {
+    const collectedForPeriod = data.payments
+      .filter((p) => p.period === per && p.status === "paid")
+      .reduce((acc, p) => acc + p.amount, 0);
+    return {
+      period: per,
+      label: formatPeriod(per),
+      collected: collectedForPeriod,
+      target,
+    };
+  });
 
   return {
     profile: data.profile,
     kosName: data.kos.name,
-    settings,
-    rooms: roomMetrics,
-    monthlyKwh: month.kwh,
-    monthlyCost: month.rupiah,
-    budgetLimit,
-    budgetRatio,
-    tone,
-    statusLabel: statusLabelFromTone(tone),
-    totalWatt,
-    totalCurrent,
-    voltage,
-    frequency,
-    lastReadingAt,
-    deviceOnline,
-    isStale,
-    roomCount: rooms.length,
+    settings: data.settings,
+    rooms,
+    counts,
+    monthlyIncome: {
+      period,
+      target,
+      collected,
+      pending: pendingAdjusted,
+      overdue: overdueAdjusted,
+    },
+    incomeHistory,
     notifications: data.notifications,
+    cctvUrl: data.settings.cctvUrl ?? data.kos.cctvUrl,
+    uiMode: data.settings.uiMode,
   };
 }
 
-function summaryMap(data: AppData): Map<string, DailySummary> {
-  const map = new Map<string, DailySummary>();
-  for (const row of data.summaries) {
-    if (row.roomId === null) map.set(row.date, row);
-  }
-  return map;
+export function selectRoomDetail(data: AppData, roomId: string, now = new Date()): RoomDetailView | null {
+  const room = data.rooms.find((r) => r.id === roomId);
+  if (!room) return null;
+  const tenant = data.tenants.find((t) => t.roomId === roomId) ?? null;
+  const payments = data.payments
+    .filter((p) => p.roomId === roomId)
+    .slice()
+    .sort((a, b) => (a.period < b.period ? 1 : -1));
+  const period = currentPeriod(now);
+  const currentPayment = payments.find((p) => p.period === period) ?? null;
+  return { room, tenant, payments, currentPayment };
 }
 
-export function selectHistory(
-  data: AppData,
-  range: HistoryRange,
-  now = new Date(),
-): HistoryView {
-  const today = startOfDay(now);
-  let start = today;
-  let end = today;
-  let rangeLabel = "7 Hari Terakhir";
+export function selectPayments(data: AppData, filter: PaymentFilter = {}, now = new Date()): Payment[] {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let list = data.payments.slice();
 
-  if (range === "7d") {
-    start = addDays(today, -6);
-    end = today;
-    rangeLabel = "7 Hari Terakhir";
-  } else if (range === "this-month") {
-    start = startOfMonth(today);
-    end = today;
-    rangeLabel = formatMonthYear(today);
-  } else {
-    const prevMonthDate = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-    start = startOfMonth(prevMonthDate);
-    end = new Date(today.getFullYear(), today.getMonth(), 0);
-    rangeLabel = `${monthName(prevMonthDate)} ${prevMonthDate.getFullYear()}`;
+  if (filter.period && filter.period !== "all") {
+    list = list.filter((p) => p.period === filter.period);
   }
-
-  const map = summaryMap(data);
-  const days: HistoryDay[] = [];
-  let cursor = startOfDay(start);
-
-  while (cursor.getTime() <= end.getTime()) {
-    const key = toDateKey(cursor);
-    const summary = map.get(key);
-    days.push({
-      date: key,
-      kwh: summary?.totalKwh ?? 0,
-      rupiah: summary?.totalRupiah ?? 0,
-      isToday: isSameDay(cursor, today),
-      isMissing: !summary,
+  if (filter.roomId) {
+    list = list.filter((p) => p.roomId === filter.roomId);
+  }
+  if (filter.status && filter.status !== "all") {
+    list = list.filter((p) => {
+      const s = p.status === "pending" && new Date(p.dueDate).getTime() < today.getTime() ? "overdue" : p.status;
+      return s === filter.status;
     });
-    cursor = addDays(cursor, 1);
   }
 
-  const withData = days.filter((day) => !day.isMissing);
-  const totals = withData.reduce(
-    (acc, day) => ({ kwh: acc.kwh + day.kwh, rupiah: acc.rupiah + day.rupiah }),
-    { kwh: 0, rupiah: 0 },
-  );
+  return list.sort((a, b) => (a.period < b.period ? 1 : a.period > b.period ? -1 : a.roomId.localeCompare(b.roomId)));
+}
 
-  const divisor = withData.length || days.length || 1;
-
-  const peak = withData.reduce<HistoryDay | null>(
-    (best, day) => (!best || day.kwh > best.kwh ? day : best),
-    null,
-  );
-  const lowest = withData.reduce<HistoryDay | null>(
-    (best, day) => (!best || day.kwh < best.kwh ? day : best),
-    null,
-  );
-
-  const dailyTargetKwh =
-    data.settings.tariffPerKwh > 0
-      ? data.settings.budgetLimit / data.settings.tariffPerKwh / daysInMonth(today)
-      : 0;
-
+export function selectPaymentHistory(data: AppData): PaymentHistoryView {
+  const payments = data.payments.slice().sort((a, b) => (a.period < b.period ? 1 : -1));
+  const totalCollected = payments.filter((p) => p.status === "paid").reduce((a, p) => a + p.amount, 0);
+  const totalPending = payments.filter((p) => p.status === "pending").reduce((a, p) => a + p.amount, 0);
+  const totalOverdue = payments.filter((p) => p.status === "overdue").reduce((a, p) => a + p.amount, 0);
   return {
-    days,
-    rangeLabel,
-    totalKwh: totals.kwh,
-    totalRupiah: totals.rupiah,
-    averageKwh: totals.kwh / divisor,
-    averageRupiah: totals.rupiah / divisor,
-    peak,
-    lowest,
-    dailyTargetKwh,
-    tariffPerKwh: data.settings.tariffPerKwh,
+    payments,
+    rooms: data.rooms,
+    tenants: data.tenants,
+    totalCollected,
+    totalPending,
+    totalOverdue,
   };
 }
 
-export function historyDayToDate(day: HistoryDay): Date {
-  return fromDateKey(day.date);
+export function periodsAvailable(data: AppData): string[] {
+  const set = new Set(data.payments.map((p) => p.period));
+  return Array.from(set).sort().reverse();
 }

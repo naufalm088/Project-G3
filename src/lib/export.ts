@@ -1,19 +1,10 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
-import { dayName, formatDateShort, fromDateKey } from "@/lib/date";
-import { formatNumber, formatRupiah } from "@/lib/energy";
-import { historyDayStatus } from "@/lib/history-status";
-import type { HistoryView } from "@/lib/types";
+import { formatRupiah } from "@/lib/format";
+import type { PaymentHistoryView } from "@/lib/types";
 
 function safeFileName(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function formatDecimal(value: number, digits = 2): string {
-  return formatNumber(value, digits);
+  return label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -35,34 +26,32 @@ function csvCell(value: string | number): string {
   return text;
 }
 
-export function downloadHistoryCsv(history: HistoryView, kosName: string) {
+export function downloadPaymentCsv(view: PaymentHistoryView, kosName: string) {
   const lines: string[] = [];
-
-  lines.push(csvCell(`Laporan Riwayat Energi - ${kosName}`));
-  lines.push(csvCell(`Periode;${history.rangeLabel}`));
-  lines.push(csvCell(`Total;${formatDecimal(history.totalKwh)} kWh;${history.totalRupiah}`));
+  lines.push(csvCell(`Laporan Pembayaran Kos - ${kosName}`));
+  lines.push(csvCell(`Total Lunas;${view.totalCollected}`));
+  lines.push(csvCell(`Total Belum;${view.totalPending}`));
+  lines.push(csvCell(`Total Jatuh Tempo;${view.totalOverdue}`));
   lines.push("");
 
-  const header = [
-    "Tanggal",
-    "Hari",
-    "Pemakaian (kWh)",
-    "Biaya (Rp)",
-    "Status",
-    "Keterangan",
-  ];
+  const header = ["Periode", "Kamar", "Penghuni", "Jumlah (Rp)", "Jatuh Tempo", "Status", "Dibayar"];
   lines.push(header.map(csvCell).join(";"));
 
-  for (const day of history.days) {
-    const status = historyDayStatus(day, history.dailyTargetKwh);
+  const roomMap = new Map(view.rooms.map((r) => [r.id, r]));
+  const tenantMap = new Map(view.tenants.map((t) => [t.id, t]));
+
+  for (const p of view.payments) {
+    const room = roomMap.get(p.roomId);
+    const tenant = p.tenantId ? tenantMap.get(p.tenantId) : undefined;
     lines.push(
       [
-        day.date,
-        dayName(fromDateKey(day.date)),
-        formatDecimal(day.kwh, 2),
-        Math.round(day.rupiah),
-        status.label,
-        status.description,
+        p.period,
+        room?.name ?? "-",
+        tenant?.fullName ?? "-",
+        Math.round(p.amount),
+        p.dueDate,
+        p.status,
+        p.paidAt ? new Date(p.paidAt).toISOString().slice(0, 10) : "-",
       ]
         .map(csvCell)
         .join(";"),
@@ -70,16 +59,13 @@ export function downloadHistoryCsv(history: HistoryView, kosName: string) {
   }
 
   lines.push("");
-  lines.push(csvCell(`Tarif per kWh;${history.tariffPerKwh}`));
-  lines.push(csvCell("Dibuat oleh Smart Kos Energi - Kelompok G3"));
+  lines.push(csvCell("Dibuat oleh Smart Kos Monitor - Kelompok G3"));
 
-  const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], {
-    type: "text/csv;charset=utf-8;",
-  });
-  downloadBlob(blob, `riwayat-energi-${safeFileName(history.rangeLabel)}.csv`);
+  const blob = new Blob([`\uFEFF${lines.join("\r\n")}`], { type: "text/csv;charset=utf-8;" });
+  downloadBlob(blob, `pembayaran-kos-${safeFileName(kosName)}.csv`);
 }
 
-export function downloadHistoryPdf(history: HistoryView, kosName: string) {
+export function downloadPaymentPdf(view: PaymentHistoryView, kosName: string) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
 
@@ -88,62 +74,61 @@ export function downloadHistoryPdf(history: HistoryView, kosName: string) {
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(18);
-  doc.text("Laporan Riwayat Energi", 40, 38);
+  doc.text("Laporan Pembayaran Kos", 40, 38);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   doc.text(kosName, 40, 56);
-  doc.text(`Periode: ${history.rangeLabel}`, 40, 70);
+  doc.text(`Total catatan: ${view.payments.length}`, 40, 70);
 
   doc.setTextColor(11, 28, 48);
   doc.setFontSize(10);
   doc.text(
-    `Total: ${formatDecimal(history.totalKwh)} kWh  |  ${formatRupiah(history.totalRupiah)}  |  Rata-rata: ${formatDecimal(
-      history.averageKwh,
-    )} kWh/hari`,
+    `Lunas: ${formatRupiah(view.totalCollected)}  |  Belum: ${formatRupiah(view.totalPending)}  |  Jatuh tempo: ${formatRupiah(view.totalOverdue)}`,
     40,
     112,
   );
-  doc.text(
-    `Target harian: ${formatDecimal(history.dailyTargetKwh)} kWh  |  Tarif: ${formatRupiah(
-      history.tariffPerKwh,
-    )} / kWh`,
-    40,
-    128,
-  );
 
-  const rows = history.days.map((day) => {
-    const status = historyDayStatus(day, history.dailyTargetKwh);
+  const roomMap = new Map(view.rooms.map((r) => [r.id, r]));
+  const tenantMap = new Map(view.tenants.map((t) => [t.id, t]));
+
+  const rows = view.payments.map((p) => {
+    const room = roomMap.get(p.roomId);
+    const tenant = p.tenantId ? tenantMap.get(p.tenantId) : undefined;
     return [
-      `${dayName(fromDateKey(day.date))}, ${formatDateShort(fromDateKey(day.date))}`,
-      day.isMissing ? "-" : formatDecimal(day.kwh, 2),
-      day.isMissing ? "-" : formatRupiah(day.rupiah),
-      status.label,
-      status.description,
+      p.period,
+      room?.name ?? "-",
+      tenant?.fullName ?? "-",
+      formatRupiah(p.amount),
+      new Date(p.dueDate).toLocaleDateString("id-ID"),
+      p.status === "paid" ? "Lunas" : p.status === "overdue" ? "Jatuh Tempo" : "Belum",
+      p.paidAt ? new Date(p.paidAt).toLocaleDateString("id-ID") : "-",
     ];
   });
 
   autoTable(doc, {
-    startY: 146,
-    head: [["Tanggal", "kWh", "Biaya", "Status", "Keterangan"]],
+    startY: 130,
+    head: [["Periode", "Kamar", "Penghuni", "Jumlah", "Jatuh Tempo", "Status", "Dibayar"]],
     body: rows,
     theme: "grid",
     styles: { fontSize: 8, cellPadding: 5, textColor: [30, 41, 59] },
     headStyles: { fillColor: [0, 104, 95], textColor: [255, 255, 255], fontStyle: "bold" },
     alternateRowStyles: { fillColor: [239, 244, 255] },
     columnStyles: {
-      0: { cellWidth: 110 },
-      1: { cellWidth: 45, halign: "right" },
-      2: { cellWidth: 85, halign: "right" },
-      3: { cellWidth: 70 },
-      4: { cellWidth: "auto" },
+      0: { cellWidth: 55 },
+      1: { cellWidth: 60 },
+      2: { cellWidth: 90 },
+      3: { cellWidth: 75, halign: "right" },
+      4: { cellWidth: 70 },
+      5: { cellWidth: 60 },
+      6: { cellWidth: 70 },
     },
     didDrawPage: () => {
       const pageHeight = doc.internal.pageSize.getHeight();
       doc.setFontSize(8);
       doc.setTextColor(109, 122, 119);
-      doc.text("Dibuat oleh Smart Kos Energi - Kelompok G3", 40, pageHeight - 24);
+      doc.text("Dibuat oleh Smart Kos Monitor - Kelompok G3", 40, pageHeight - 24);
     },
   });
 
-  doc.save(`riwayat-energi-${safeFileName(history.rangeLabel)}.pdf`);
+  doc.save(`pembayaran-kos-${safeFileName(kosName)}.pdf`);
 }

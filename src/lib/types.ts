@@ -1,6 +1,12 @@
+export type DataSource = "demo" | "supabase";
+
 export type StatusTone = "safe" | "warn" | "danger" | "neutral";
 
-export type DataSource = "demo" | "supabase";
+export type UiMode = "classic" | "modern";
+
+export type RoomStatus = "occupied" | "vacant" | "maintenance";
+
+export type PaymentStatus = "pending" | "paid" | "overdue";
 
 export type ProfileInfo = {
   id: string;
@@ -15,63 +21,61 @@ export type Kos = {
   ownerId: string;
   name: string;
   address: string | null;
+  cctvUrl: string | null;
 };
 
 export type Room = {
   id: string;
   kosId: string;
+  number: string;
   name: string;
-  tenantName: string | null;
+  floor: number;
+  monthlyRent: number;
+  status: RoomStatus;
   sortOrder: number;
-  mcbLimitAmp: number;
-  relayOn: boolean;
+  createdAt: string;
 };
 
-export type Device = {
+export type Tenant = {
   id: string;
   kosId: string;
-  roomId: string | null;
-  name: string;
-  lastSeenAt: string | null;
-  isOnline: boolean;
+  roomId: string;
+  fullName: string;
+  phone: string | null;
+  moveInDate: string | null;
+  monthlyRent: number | null;
+  dueDay: number;
+  notes: string | null;
+  createdAt: string;
 };
 
-export type Reading = {
-  id: number | string;
+export type Payment = {
+  id: string;
   kosId: string;
-  roomId: string | null;
-  deviceId: string | null;
-  ts: string;
-  voltage: number | null;
-  current: number | null;
-  powerWatt: number | null;
-  energyKwh: number;
-  frequency: number | null;
-  powerFactor: number | null;
-};
-
-export type DailySummary = {
-  id?: string;
-  kosId: string;
-  roomId: string | null;
-  date: string;
-  totalKwh: number;
-  totalRupiah: number;
+  roomId: string;
+  tenantId: string | null;
+  period: string; // "YYYY-MM"
+  amount: number;
+  dueDate: string; // ISO date
+  paidAt: string | null;
+  status: PaymentStatus;
+  method: string | null;
+  notes: string | null;
+  createdAt: string;
 };
 
 export type Settings = {
   id: string;
   kosId: string;
-  budgetLimit: number;
-  tariffPerKwh: number;
+  rentDueDay: number;
+  defaultRent: number;
   notifActive: boolean;
-  notifWaspada: boolean;
-  notifBahaya: boolean;
-  warnThreshold: number;
-  dangerThreshold: number;
-  notifWa: boolean;
-  notifPush: boolean;
-  waNumber: string | null;
+  notifReminder: boolean;
+  notifOverdue: boolean;
+  ownerPhone: string | null;
+  cctvUrl: string | null;
+  uiMode: UiMode;
+  waTemplate: string | null;
   updatedAt: string;
 };
 
@@ -85,28 +89,19 @@ export type NotificationRow = {
   createdAt: string;
 };
 
-export type AppData = {
-  source: DataSource;
-  profile: ProfileInfo;
-  kos: Kos;
-  settings: Settings;
-  rooms: Room[];
-  devices: Device[];
-  latestReadings: Record<string, Reading | undefined>;
-  summaries: DailySummary[];
-  notifications: NotificationRow[];
-  fetchedAt: string;
-};
-
 export type RoomMetric = {
   room: Room;
-  monthlyKwh: number;
-  monthlyCost: number;
-  currentWatt: number;
-  latest: Reading | undefined;
-  tone: StatusTone;
-  shareOfTotal: number;
-  isTopConsumer: boolean;
+  tenant: Tenant | null;
+  effectiveRent: number;
+  payment: Payment | null;
+  paymentStatus: PaymentStatus | "none";
+};
+
+export type IncomePoint = {
+  period: string; // "YYYY-MM"
+  label: string; // "Nov 2026"
+  collected: number;
+  target: number;
 };
 
 export type DashboardView = {
@@ -114,40 +109,51 @@ export type DashboardView = {
   kosName: string;
   settings: Settings;
   rooms: RoomMetric[];
-  monthlyKwh: number;
-  monthlyCost: number;
-  budgetLimit: number;
-  budgetRatio: number;
-  tone: StatusTone;
-  statusLabel: string;
-  totalWatt: number;
-  totalCurrent: number;
-  voltage: number | null;
-  frequency: number | null;
-  lastReadingAt: string | null;
-  deviceOnline: boolean;
-  isStale: boolean;
-  roomCount: number;
+  counts: {
+    total: number;
+    occupied: number;
+    vacant: number;
+    maintenance: number;
+    overdue: number;
+    pending: number;
+  };
+  monthlyIncome: {
+    period: string;
+    target: number;
+    collected: number;
+    pending: number;
+    overdue: number;
+  };
+  incomeHistory: IncomePoint[];
   notifications: NotificationRow[];
+  cctvUrl: string | null;
+  uiMode: UiMode;
 };
 
-export type HistoryDay = {
-  date: string;
-  kwh: number;
-  rupiah: number;
-  isToday: boolean;
-  isMissing: boolean;
+export type RoomDetailView = {
+  room: Room;
+  tenant: Tenant | null;
+  payments: Payment[];
+  currentPayment: Payment | null;
 };
 
-export type HistoryView = {
-  days: HistoryDay[];
-  rangeLabel: string;
-  totalKwh: number;
-  totalRupiah: number;
-  averageKwh: number;
-  averageRupiah: number;
-  peak: HistoryDay | null;
-  lowest: HistoryDay | null;
-  dailyTargetKwh: number;
-  tariffPerKwh: number;
+export type PaymentHistoryView = {
+  payments: Payment[];
+  rooms: Room[];
+  tenants: Tenant[];
+  totalCollected: number;
+  totalPending: number;
+  totalOverdue: number;
+};
+
+export type AppData = {
+  source: DataSource;
+  profile: ProfileInfo;
+  kos: Kos;
+  settings: Settings;
+  rooms: Room[];
+  tenants: Tenant[];
+  payments: Payment[];
+  notifications: NotificationRow[];
+  fetchedAt: string;
 };

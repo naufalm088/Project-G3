@@ -103,7 +103,7 @@ export function LoginForm() {
           <Logo className="h-12 w-12" />
           <div className="flex flex-col">
             <span className="font-headline-md text-body-lg font-bold text-on-surface">
-              Smart Kos Energi
+              Monitoring Kos Ijo
             </span>
             <span className="font-label-status text-label-status uppercase tracking-wider text-on-surface-variant">
               Kelompok G3

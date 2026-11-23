@@ -18,10 +18,10 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  applicationName: "Smart Kos Energi",
+  applicationName: "Monitoring Kos Ijo",
   title: {
-    default: "Smart Kos Energi",
-    template: "%s · Smart Kos Energi",
+    default: "Monitoring Kos Ijo",
+    template: "%s · Monitoring Kos Ijo",
   },
   description:
     "Dashboard monitoring listrik kos berbasis IoT: estimasi tagihan, tren pemakaian, dan peringatan dini untuk pemilik kos.",
